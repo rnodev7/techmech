@@ -5,6 +5,7 @@
     const CFG = window.TECHMECH || {};
     const configurado = () => !!(CFG.supabaseUrl && CFG.supabaseChave && !CFG.supabaseUrl.includes('COLE-AQUI'));
     const urlPedidos = () => CFG.supabaseUrl.replace(/\/$/, '') + '/rest/v1/pedidos';
+    const urlProdutos = () => CFG.supabaseUrl.replace(/\/$/, '') + '/rest/v1/produtos';
 
     // cabeçalhos
     const cabecalho = (token, extra = {}) => {
@@ -52,6 +53,36 @@
             });
         },
 
+        // produtos da loja (leitura pública, só os ativos)
+        async listarProdutos() {
+            if (!configurado()) return [];
+            const r = await fetch(urlProdutos() + '?select=*&ativo=eq.true&order=criado_em.asc&limit=1000', { headers: cabecalho(null), cache: 'no-store' });
+            if (!r.ok) throw new Error('erro ' + r.status);
+            return r.json();
+        },
+
+        // envia a imagem de um produto para o Storage e devolve o link público
+        async enviarImagem(arquivo) {
+            if (!configurado()) throw new Error('config.js ainda não foi preenchido');
+            const token = window.Auth && Auth.token();
+            if (!token) throw new Error('Não autenticado');
+            if (!/^image\//.test(arquivo.type)) throw new Error('O arquivo precisa ser uma imagem');
+            if (arquivo.size > 5 * 1024 * 1024) throw new Error('A imagem passa de 5 MB');
+            const ext = (arquivo.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg';
+            const nome = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+            const base = CFG.supabaseUrl.replace(/\/$/, '') + '/storage/v1/object/';
+            const r = await fetch(base + 'produtos/' + nome, {
+                method: 'POST',
+                headers: { apikey: CFG.supabaseChave, Authorization: 'Bearer ' + token, 'Content-Type': arquivo.type, 'x-upsert': 'false' },
+                body: arquivo
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => null);
+                throw new Error((d && (d.message || d.error)) || 'Erro ao enviar a imagem (rodou o supabase_produtos.sql?)');
+            }
+            return base + 'public/produtos/' + nome;
+        },
+
         // painel admin
         async admin(url, opc = {}) {
             if (!configurado()) return resposta({ erro: 'config.js ainda não foi preenchido' }, 500);
@@ -95,6 +126,27 @@
                 if (!r.ok) return erroDe(r);
                 const afetados = await r.json().catch(() => []);
                 return afetados.length ? resposta({ ok: true }) : resposta({ erro: 'Pedido não encontrado' }, 404);
+            }
+            // produtos
+            if (partes[0] === 'produtos') {
+                if (partes.length === 1 && metodo === 'GET') {
+                    r = await fetch(urlProdutos() + '?select=*&order=criado_em.desc&limit=1000', { headers: h(), cache: 'no-store' });
+                    return r.ok ? resposta(await r.json()) : erroDe(r);
+                }
+                if (partes.length === 1 && metodo === 'POST') {
+                    r = await fetch(urlProdutos(), { method: 'POST', headers: h({ Prefer: 'return=representation' }), body: JSON.stringify(corpo) });
+                    return r.ok ? resposta((await r.json())[0] || { ok: true }, 201) : erroDe(r);
+                }
+                if (partes.length === 2 && (metodo === 'PATCH' || metodo === 'DELETE')) {
+                    r = await fetch(urlProdutos() + '?id=eq.' + encodeURIComponent(partes[1]), {
+                        method: metodo,
+                        headers: h({ Prefer: 'return=representation' }),
+                        body: metodo === 'PATCH' ? JSON.stringify(corpo) : undefined
+                    });
+                    if (!r.ok) return erroDe(r);
+                    const afetados = await r.json().catch(() => []);
+                    return afetados.length ? resposta({ ok: true }) : resposta({ erro: 'Produto não encontrado' }, 404);
+                }
             }
             return resposta({ erro: 'Rota não encontrada' }, 404);
         }

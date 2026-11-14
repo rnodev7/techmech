@@ -171,6 +171,29 @@ td.dir, th.dir { text-align: right; }
 .status option { background: var(--panel); color: var(--text); }
 .mais { display: block; margin: 16px auto 0; }
 
+/* produtos */
+.prod-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; align-items: start; }
+.prod-form label { display: grid; gap: 6px; color: var(--text-soft); font-size: .85rem; font-weight: 600; }
+.prod-form .largo { grid-column: 1 / -1; }
+.prod-form input { width: 100%; padding: 10px 12px; border-radius: 10px; background: var(--bg-1); border: 1px solid var(--stroke); color: var(--text); font-weight: 500; }
+.prod-form input:focus { outline: none; border-color: var(--accent); }
+.prod-form input[type="file"] { padding: 8px; font-size: .85rem; }
+.prod-prev { grid-column: 1 / -1; display: grid; place-items: center; height: 150px; border-radius: 12px; border: 1px dashed var(--stroke-strong); background: #eef1f8; color: #6b7390; font-size: .85rem; overflow: hidden; }
+.prod-prev img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; }
+.prod-acoes { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
+.btn.primario { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; color: #fff; }
+.btn:disabled { opacity: .5; cursor: wait; }
+.prod-lista { list-style: none; display: grid; gap: 10px; }
+.prod-item { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--stroke); border-radius: 12px; background: var(--panel-2); }
+.prod-item.inativo { opacity: .55; }
+.prod-thumb { width: 56px; height: 56px; border-radius: 10px; background: #eef1f8; display: grid; place-items: center; overflow: hidden; }
+.prod-thumb img { width: 90%; height: 90%; object-fit: contain; mix-blend-mode: multiply; }
+.prod-nome { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prod-meta { color: var(--text-faint); font-size: .85rem; }
+.prod-botoes { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.prod-botoes .btn { padding: 6px 12px; font-size: .82rem; }
+@media (max-width: 640px) { .prod-form { grid-template-columns: 1fr; } .prod-item { grid-template-columns: 56px minmax(0, 1fr); } .prod-botoes { grid-column: 1 / -1; justify-content: flex-start; } }
+
 /* vazio geral */
 .estado-vazio { text-align: center; padding: 38px 16px; }
 .estado-vazio h3 { font: 700 1.2rem var(--font-display); margin-bottom: 6px; }
@@ -290,6 +313,41 @@ dialog::backdrop { background: rgba(3,4,10,.7); backdrop-filter: blur(3px); }
         <button class="btn mais" type="button" id="mais" hidden>Mostrar mais pedidos</button>
     </section>
 
+    <section class="painel" aria-labelledby="t-prod" id="area-produtos">
+        <div class="painel-topo">
+            <h2 id="t-prod">Produtos da loja</h2>
+            <span class="sub" id="prod-sub"></span>
+        </div>
+        <form class="prod-form" id="prod-form" autocomplete="off">
+            <input type="hidden" id="pf-id">
+            <label>Categoria
+                <input id="pf-cat" list="lista-cat" required maxlength="60" placeholder="Ex.: Placa de vídeo">
+                <datalist id="lista-cat"></datalist>
+            </label>
+            <label>Nome do produto
+                <input id="pf-nome" required maxlength="120" placeholder="Ex.: RTX 5070 Ti 16GB">
+            </label>
+            <label>Preço antigo (R$) <small class="sub">opcional, aparece riscado</small>
+                <input id="pf-antigo" type="number" step="0.01" min="0.01" inputmode="decimal" placeholder="0,00">
+            </label>
+            <label>Preço atual (R$)
+                <input id="pf-preco" type="number" step="0.01" min="0.01" max="999999" inputmode="decimal" required placeholder="0,00">
+            </label>
+            <label class="largo">Imagem (link)
+                <input id="pf-img" type="url" placeholder="https://...">
+            </label>
+            <label class="largo">Ou enviar uma imagem do computador (até 5 MB)
+                <input id="pf-arq" type="file" accept="image/*">
+            </label>
+            <div class="prod-prev" id="pf-prev">Sem imagem</div>
+            <div class="prod-acoes">
+                <button class="btn primario" type="submit" id="pf-salvar">Adicionar produto</button>
+                <button class="btn" type="button" id="pf-cancelar" hidden>Cancelar edição</button>
+            </div>
+        </form>
+        <ul class="prod-lista" id="prod-lista"></ul>
+    </section>
+
     <section class="painel" aria-labelledby="t-dados">
         <div class="painel-topo"><h2 id="t-dados">Dados</h2></div>
         <div class="ferramentas" style="margin:0">
@@ -340,6 +398,7 @@ const carregar = async () => {
     catch (e) { if (e.message === '401') return; conectado = false; }
     render();
     carregarAnalise();
+    carregarProdutos();
 };
 
 // análise
@@ -669,6 +728,113 @@ const exportar = () => {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     aviso(`${lista.length} pedido${lista.length > 1 ? 's' : ''} exportado${lista.length > 1 ? 's' : ''}`);
 };
+
+// produtos da loja
+let prods = [];
+const CATEGORIAS_BASE = ['Placa de vídeo', 'Processador'];
+let urlLocal = null;
+
+const carregarProdutos = async () => {
+    try { prods = await api('produtos'); }
+    catch (e) {
+        if (e.message === '401') return;
+        $('#prod-sub').textContent = 'Não foi possível carregar. Rodou o supabase_produtos.sql?';
+        return;
+    }
+    renderProdutos();
+};
+
+const renderProdutos = () => {
+    const ativos = prods.filter((p) => p.ativo).length;
+    $('#prod-sub').textContent = prods.length ? `${prods.length} cadastrado${prods.length > 1 ? 's' : ''} · ${ativos} na loja` : '';
+    $('#lista-cat').innerHTML = [...new Set([...CATEGORIAS_BASE, ...prods.map((p) => p.categoria)])].map((c) => `<option value="${esc(c)}">`).join('');
+    $('#prod-lista').innerHTML = prods.length ? prods.map((p) => `
+        <li class="prod-item ${p.ativo ? '' : 'inativo'}">
+            <div class="prod-thumb">${p.imagem ? `<img src="${esc(p.imagem)}" alt="" loading="lazy">` : ''}</div>
+            <div style="min-width:0">
+                <div class="prod-nome" title="${esc(p.nome)}">${esc(p.nome)}</div>
+                <div class="prod-meta">${esc(p.categoria)} · <b class="num">${brl(Number(p.preco))}</b>${Number(p.preco_antigo) > Number(p.preco) ? ` (de ${brl(Number(p.preco_antigo))})` : ''}${p.ativo ? '' : ' · oculto na loja'}</div>
+            </div>
+            <div class="prod-botoes">
+                <button type="button" class="btn" data-pedit="${p.id}">Editar</button>
+                <button type="button" class="btn" data-ptoggle="${p.id}">${p.ativo ? 'Ocultar' : 'Mostrar'}</button>
+                <button type="button" class="btn perigo" data-pdel="${p.id}">Excluir</button>
+            </div>
+        </li>`).join('') : '<li class="vazio">Nenhum produto cadastrado aqui ainda. Os produtos fixos do index.html continuam aparecendo na loja.</li>';
+};
+
+const prever = (src) => {
+    $('#pf-prev').innerHTML = src ? `<img src="${esc(src)}" alt="Prévia da imagem">` : 'Sem imagem';
+};
+
+const limparForm = () => {
+    $('#prod-form').reset();
+    $('#pf-id').value = '';
+    $('#pf-salvar').textContent = 'Adicionar produto';
+    $('#pf-cancelar').hidden = true;
+    if (urlLocal) { URL.revokeObjectURL(urlLocal); urlLocal = null; }
+    prever('');
+};
+
+$('#pf-img').addEventListener('input', (e) => prever(e.target.value.trim()));
+$('#pf-arq').addEventListener('change', (e) => {
+    if (urlLocal) { URL.revokeObjectURL(urlLocal); urlLocal = null; }
+    const f = e.target.files[0];
+    if (f) { urlLocal = URL.createObjectURL(f); prever(urlLocal); }
+    else prever($('#pf-img').value.trim());
+});
+$('#pf-cancelar').addEventListener('click', limparForm);
+
+$('#prod-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#pf-salvar');
+    btn.disabled = true;
+    try {
+        const preco = Number($('#pf-preco').value);
+        const antigo = Number($('#pf-antigo').value) || preco;
+        if (!(preco > 0)) throw new Error('Informe o preço atual');
+        if (antigo < preco) throw new Error('O preço antigo não pode ser menor que o atual');
+        let imagem = $('#pf-img').value.trim();
+        const arq = $('#pf-arq').files[0];
+        if (arq) imagem = await Banco.enviarImagem(arq);
+        if (imagem && !/^https?:\/\//i.test(imagem)) throw new Error('O link da imagem precisa começar com http:// ou https://');
+        const corpo = { categoria: $('#pf-cat').value.trim(), nome: $('#pf-nome').value.trim(), preco_antigo: arred(antigo), preco: arred(preco), imagem };
+        const id = $('#pf-id').value;
+        if (id) await api('produtos/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(corpo) });
+        else await api('produtos', { method: 'POST', body: JSON.stringify(corpo) });
+        aviso(id ? 'Produto atualizado' : 'Produto adicionado à loja');
+        limparForm();
+        await carregarProdutos();
+    } catch (err) { aviso(err.message); }
+    finally { btn.disabled = false; }
+});
+
+$('#prod-lista').addEventListener('click', async (e) => {
+    const ed = e.target.closest('[data-pedit]');
+    const tg = e.target.closest('[data-ptoggle]');
+    const del = e.target.closest('[data-pdel]');
+    if (ed) {
+        const p = prods.find((x) => String(x.id) === ed.dataset.pedit); if (!p) return;
+        $('#pf-id').value = p.id; $('#pf-cat').value = p.categoria; $('#pf-nome').value = p.nome;
+        $('#pf-antigo').value = p.preco_antigo; $('#pf-preco').value = p.preco; $('#pf-img').value = p.imagem || '';
+        $('#pf-arq').value = ''; prever(p.imagem || '');
+        $('#pf-salvar').textContent = 'Salvar alterações'; $('#pf-cancelar').hidden = false;
+        $('#area-produtos').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+    try {
+        if (tg) {
+            const p = prods.find((x) => String(x.id) === tg.dataset.ptoggle); if (!p) return;
+            await api('produtos/' + encodeURIComponent(p.id), { method: 'PATCH', body: JSON.stringify({ ativo: !p.ativo }) });
+            aviso(p.ativo ? 'Produto oculto da loja' : 'Produto visível na loja');
+        } else if (del) {
+            if (!confirm('Excluir este produto da loja? Essa ação não pode ser desfeita.')) return;
+            await api('produtos/' + encodeURIComponent(del.dataset.pdel), { method: 'DELETE' });
+            aviso('Produto excluído');
+        } else return;
+    } catch (err) { aviso(err.message); }
+    await carregarProdutos();
+});
 
 // eventos
 $('#periodo').addEventListener('click', (e) => {

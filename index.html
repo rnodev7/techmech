@@ -95,18 +95,23 @@
         const numero = (txt) => parseFloat(txt.replace(/\./g, "").replace(",", "."));
 
         const grid = document.getElementById("produtos");
+        const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+        const podeMover = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const temMouse = matchMedia("(hover: hover)").matches;
+
+        const montar = () => {
         grid.innerHTML = produtos.map(([categoria, nome, antigo, atual, imagem], i) => {
             const desconto = Math.round((1 - numero(atual) / numero(antigo)) * 100);
             return `
             <div class="product-card" style="--i:${i % 8}">
                 ${desconto > 0 ? `<span class="product-badge">-${desconto}%</span>` : ""}
                 <div class="card-shine"></div>
-                <div class="product-image"><img src="${imagem}" alt="${nome}" loading="lazy"></div>
+                <div class="product-image"><img src="${esc(imagem)}" alt="${esc(nome)}" loading="lazy"></div>
                 <div class="product-info">
-                    <span class="product-category">${categoria}</span>
-                    <h2 class="product-title">${nome}</h2>
+                    <span class="product-category">${esc(categoria)}</span>
+                    <h2 class="product-title">${esc(nome)}</h2>
                     <div class="product-price-container">
-                        <span class="price-old">R$ ${antigo}</span>
+                        ${desconto > 0 ? `<span class="price-old">R$ ${antigo}</span>` : ""}
                         <span class="price-current">R$ ${atual}</span>
                     </div>
                     <button class="btn-buy" data-i="${i}">Comprar Agora</button>
@@ -115,8 +120,6 @@
         }).join("");
 
         const cards = [...grid.querySelectorAll(".product-card")];
-        const podeMover = !matchMedia("(prefers-reduced-motion: reduce)").matches;
-        const temMouse = matchMedia("(hover: hover)").matches;
 
         // imagem quebrada
         grid.querySelectorAll(".product-image img").forEach((img) => {
@@ -155,7 +158,10 @@
                     card.style.transition = "";
                 });
             });
+        }
+        };
 
+        if (temMouse && podeMover) {
             const glow = document.createElement("div");
             glow.className = "cursor-glow";
             document.body.appendChild(glow);
@@ -164,6 +170,19 @@
                 glow.style.setProperty("--cy", `${e.clientY}px`);
             }, { passive: true });
         }
+
+        montar();
+
+        // produtos cadastrados no painel admin (Supabase) entram depois dos fixos
+        const fmtPreco = (n) => Number.isInteger(n) ? n.toLocaleString("pt-BR") : n.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+        (async () => {
+            try {
+                const lista = await Banco.listarProdutos();
+                if (!lista.length) return;
+                lista.forEach((r) => produtos.push([r.categoria, r.nome, fmtPreco(Number(r.preco_antigo)), fmtPreco(Number(r.preco)), r.imagem || "", "db" + r.id]));
+                montar();
+            } catch (_) { /* sem banco: fica só com os produtos fixos */ }
+        })();
 
         // login do painel administrativo
         (() => {
@@ -211,7 +230,7 @@
 
             const p = produtos[btn.dataset.i];
             Carrinho.adicionar({
-                id: "p" + btn.dataset.i,
+                id: p[5] || "p" + btn.dataset.i,
                 nome: p[1],
                 preco: numero(p[3]),
                 imagem: p[4],
